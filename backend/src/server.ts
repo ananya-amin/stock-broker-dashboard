@@ -1,5 +1,4 @@
-// backend/src/server.ts
-import express from 'express';
+import express, { Request, Response } from 'express';
 import http from 'http';
 import { Server as IOServer } from 'socket.io';
 import cors from 'cors';
@@ -25,7 +24,7 @@ type SymbolT = typeof SUPPORTED[number];
 const dbPath =
   process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'db.sqlite');
 
-// ✅ ensure db directory exists (important for Render)
+// ensure db directory exists (Render-safe)
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
@@ -104,9 +103,9 @@ const io = new IOServer(server, {
 ===================================================== */
 
 function ensureUser(email: string, isAdmin = false): number {
-  const row = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as
-    | { id: number }
-    | undefined;
+  const row = db
+    .prepare('SELECT id FROM users WHERE email = ?')
+    .get(email) as { id: number } | undefined;
 
   if (row) return row.id;
 
@@ -117,7 +116,7 @@ function ensureUser(email: string, isAdmin = false): number {
   return Number(result.lastInsertRowid);
 }
 
-function getSubscriptions(userId: number) {
+function getSubscriptions(userId: number): string[] {
   return db
     .prepare('SELECT symbol FROM subscriptions WHERE user_id = ?')
     .all(userId)
@@ -125,10 +124,10 @@ function getSubscriptions(userId: number) {
 }
 
 /* =====================================================
-   HEALTH CHECK (RENDER NEEDS THIS)
+   HEALTH CHECK (RENDER)
 ===================================================== */
 
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
   try {
     db.prepare('SELECT 1').get();
     res.json({ status: 'ok', time: Date.now() });
@@ -141,17 +140,17 @@ app.get('/health', (_req, res) => {
    REST API
 ===================================================== */
 
-app.get('/supported', (_req, res) => {
+app.get('/supported', (_req: Request, res: Response) => {
   res.json({ supported: SUPPORTED });
 });
 
-app.get('/me/subscriptions', (req, res) => {
+app.get('/me/subscriptions', (req: Request, res: Response) => {
   const email = String(req.query.email || '');
   if (!email) return res.json({ subscriptions: [] });
 
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as
-    | { id: number }
-    | undefined;
+  const user = db
+    .prepare('SELECT id FROM users WHERE email = ?')
+    .get(email) as { id: number } | undefined;
 
   if (!user) return res.json({ subscriptions: [] });
 
@@ -165,7 +164,7 @@ app.get('/me/subscriptions', (req, res) => {
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
 
-  socket.on('client:join', ({ email }) => {
+  socket.on('client:join', ({ email }: { email: string }) => {
     const userId = ensureUser(email);
     (socket as any).userId = userId;
 
