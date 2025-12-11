@@ -1,70 +1,87 @@
-import React, { useEffect, useState } from 'react';
-import { socket, connect } from './api';
+// frontend/src/Dashboard.tsx
+import { useEffect, useState } from 'react';
+import { socket } from './api';
+import OrderBook from './OrderBook';
+import TradeHistory from './TradeHistory';
+import Charts from './Charts';
 
-const SUPPORTED = ['GOOG','TSLA','AMZN','META','NVDA'] as const;
-type Sym = typeof SUPPORTED[number];
-type Price = { price: number; updatedAt: number };
+const SYMBOLS = ['GOOG', 'TSLA', 'AMZN', 'META', 'NVDA'];
 
-export default function Dashboard({ email, onLogout }: { email: string; onLogout: ()=>void }){
-  const [prices, setPrices] = useState<Record<Sym, Price | undefined>>({} as any);
-  const [subs, setSubs] = useState<string[]>([]);
+type PriceMap = {
+  [key: string]: {
+    price: number;
+    updatedAt: number;
+  };
+};
 
-  useEffect(()=>{
-    connect(email);
-    socket.on('prices:init', (payload)=> setPrices(payload.prices));
-    socket.on('prices:update', (payload)=> setPrices(payload));
-    socket.on('subscriptions:init', (list:string[])=> setSubs(list));
-    socket.on('subscriptions:update', (list:string[])=> setSubs(list));
-    return () => { socket.off('prices:init'); socket.off('prices:update'); socket.off('subscriptions:init'); socket.off('subscriptions:update'); };
-  }, [email]);
+export default function Dashboard({ email }: { email: string }) {
+  const [prices, setPrices] = useState<PriceMap>({});
+  const [selected, setSelected] = useState<string>('GOOG');
 
-  function toggleSub(symbol: Sym){
-    if (subs.includes(symbol)) {
-      socket.emit('unsubscribe', { symbol });
-      setSubs(prev => prev.filter(s=>s!==symbol));
-    } else {
-      socket.emit('subscribe', { symbol });
-      setSubs(prev => [...prev, symbol]);
+  useEffect(() => {
+    function onInit(data: PriceMap) {
+      setPrices(data || {});
     }
+
+    function onUpdate(data: PriceMap) {
+      setPrices(prev => ({ ...prev, ...data }));
+    }
+
+    socket.on('prices:init', onInit);
+    socket.on('prices:update', onUpdate);
+
+    return () => {
+      socket.off('prices:init', onInit);
+      socket.off('prices:update', onUpdate);
+    };
+  }, []);
+
+  // ✅ SAFETY: wait until prices load
+  if (!prices || Object.keys(prices).length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-400">
+        Loading market data...
+      </div>
+    );
   }
 
   return (
-    <div className="dashboard">
-      <header>
-        <h1>Stock Dashboard</h1>
-        <div>
-          <span>{email}</span>
-          <button onClick={onLogout}>Logout</button>
-        </div>
-      </header>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
+      {/* LEFT: Market Prices */}
+      <div className="bg-slate-900 p-4 rounded-lg">
+        <h2 className="font-semibold mb-3">Market</h2>
 
-      <section className="stocks">
-        <h2>Supported Stocks</h2>
-        <div className="grid">
-          {SUPPORTED.map(sym => {
-            const p = prices[sym]?.price ?? '—';
-            const updated = prices[sym]?.updatedAt ? new Date(prices[sym]!.updatedAt).toLocaleTimeString() : '';
-            const isSub = subs.includes(sym);
+        <div className="space-y-2">
+          {SYMBOLS.map((symbol) => {
+            const p = prices[symbol];
+
+            // ✅ another safety guard
+            if (!p) return null;
+
             return (
-              <div className={`card ${isSub? 'subbed':''}`} key={sym}>
-                <div className="row">
-                  <strong>{sym}</strong>
-                  <button onClick={()=>toggleSub(sym)}>{isSub? 'Unsubscribe': 'Subscribe'}</button>
-                </div>
-                <div className="price">{p}</div>
-                <div className="small">{updated}</div>
-              </div>
+              <button
+                key={symbol}
+                onClick={() => setSelected(symbol)}
+                className={`w-full flex justify-between p-2 rounded
+                  ${selected === symbol ? 'bg-slate-700' : 'bg-slate-800'}
+                `}
+              >
+                <span>{symbol}</span>
+                <span>${p.price.toFixed(2)}</span>
+              </button>
             );
           })}
         </div>
-      </section>
+      </div>
 
-      <section className="my-subs">
-        <h2>My Subscriptions</h2>
-        {subs.length === 0 ? <p>No subscriptions yet.</p> : (
-          <ul>{subs.map(s => <li key={s}>{s} — {prices[s as Sym]?.price ?? '—'}</li>)}</ul>
-        )}
-      </section>
+      {/* MIDDLE */}
+      <OrderBook symbol={selected} email={email} />
+
+      {/* RIGHT */}
+      <div className="space-y-4">
+        <Charts symbol={selected} />
+        <TradeHistory symbol={selected} />
+      </div>
     </div>
   );
 }
